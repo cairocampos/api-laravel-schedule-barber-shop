@@ -10,7 +10,7 @@ use App\Models\User;
 class AuthController extends Controller
 {
     public function __construct() {
-       $this->middleware("auth:api", ["except" => ["login", "create"]]);
+       $this->middleware("auth:api", ["except" => ["login", "register"]]);
     }
 
     public function login(Request $request)
@@ -30,19 +30,35 @@ class AuthController extends Controller
         return $this->respondWithToken($token);
     }
 
-    public function respondWithToken($token)
+    public function register(Request $request)
     {
+        $request->validate([
+            "name" => ["required", "string"],
+            "email" => ["required", "email", "string", "unique:users"],
+            "password" => ["required"]
+        ]);
+
+        $data = $request->only(["name", "email", "password"]);
+
+        $user = $this->create($data);
+        $token = Auth::login($user);
+        return $this->respondWithToken($token);
+
+    }
+
+    public function respondWithToken($token)
+    {   
+        $user = Auth::user();
+        $user->avatar = url("/media/avatars/{$user->avatar}");
         return response()->json([
-            "access_token" => $token,
-            "token_type" => "bearer",
-            "expires_in" => Auth::factory()->getTTL() * 60
+            "user" => Auth::user(),
+            "token" => $token,
+            "token_type" => "Bearer",
         ]);
     }
 
-    public function create(Request $request)
-    {
-        $data = $request->only(["name", "email", "password"]);        
-
+    public function create($data)
+    { 
         $user = new User;
         $user->name = $data["name"];
         $user->email = $data["email"];

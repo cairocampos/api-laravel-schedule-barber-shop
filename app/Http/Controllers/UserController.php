@@ -13,7 +13,9 @@ class UserController extends Controller
     }
 
     public function read()
-    {
+    {   
+        $user = Auth::user();
+        $user->avatar = url("media/avatars/{$user->avatar}");
         return response()->json(Auth::user());
     }
 }
