@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 use App\Models\User;
+use App\Models\UserAppointment;
+use App\Models\UserFavorite;
 use App\Models\Barber;
 use App\Models\BarberPhotos;
 use App\Models\BarberServices;
@@ -125,10 +127,15 @@ class BarberController extends Controller
             $city = "São Paulo";
         }
 
+        $offset = $request->input("page", 0);
+
         $barbers = Barber::select(Barber::raw('*, SQRT(
             POW(69.1 * (latitude - '.$lat.'), 2) + 
             POW(69.1 * ('.$lng.' - longitude) * COS(latitude / 57.3), 2)) AS distance'))
+            //->havingRaw('distance < ?', [25])
             ->orderBy('distance', 'ASC')
+            ->offset($offset)
+            ->limit(5)
             ->get();
 
         foreach($barbers as $key => $value) {
@@ -139,6 +146,93 @@ class BarberController extends Controller
         $array["loc"] = "São Paulo";
 
         return $array;
+    }
 
+    public function one($id) {
+        $array = ["error" => ''];
+
+        $barber = Barber::findOrFail($id);
+        $barber['avatar'] = url("media/avatars/".$barber['avatar']);
+        $barber['favorited'] = false;
+        $barber['photos'] = [];
+        $barber['services'] = [];
+        $barber['testimonials'] = [];
+        $barber['available'] = [];
+
+        // Verificando favorito
+        $barber['favorited'] = UserFavorite::where("id_user", Auth::id())->where("id_barber", $barber->id)->count();
+
+        // Pegando as fotos do barbeiro
+        $barber['photos'] = BarberPhotos::select("id", "url")->where('id_barber', $barber->id)->get();
+        foreach($barber['photos'] as $key => $value) {
+            $barber['photos'][$key]['url'] = url("media/uploads/{$barber['photos'][$key]['url']}");
+        }
+
+        // Pegando os serviços
+        $barber['services'] = BarberServices::select(["id", "name", "price"])->where("id_barber", $barber->id)->get();
+
+        // Pegando os depoimentos
+        $barber['testimonials'] = BarberTestimonial::select(["id", "name", "body", "rate"])->where("id_barber", $barber->id)->get();
+
+        // Pegando disponibilidade
+        /*$barber['available'] = BarberAvailability::select(["id", "weekday", "hours"])->where("id_barber", $barber->id)->get();
+        foreach($barber['available'] as $key => $value) {
+            $barber["available"][$key]['hours'] = explode(",", $barber['available'][$key]['hours']);
+        }*/
+        
+        $availability = [];
+        // - Pegando a disponibilidade crua
+        $avails = BarberAvailability::where("id_barber", $barber->id)->get();
+        $availWeekdays = [];
+        foreach($avails as $item) {
+            $availWeekdays[$item['weekday']] = explode(",", $item["hours"]);
+        }
+        
+        // - Pegar os agendamentos dos próximos 20 dias
+        $appointments = [];
+        $appQuery = UserAppointment::where("id_barber", $barber->id)
+            ->whereBetween('ap_datetime', [
+                date('Y-m-d').'00:00:00',
+                date('Y-m-d', strtotime('+20 days')).' 23:59:59'
+            ])->get();
+
+        foreach($appQuery as $appItem) {
+            $appointments[] = $appItem['ap_datetime'];
+        }
+
+        // -  Gerar disponibilidade real
+        for($q = 0; $q < 20;$q++) {
+            $timeItem = strtotime('+'.$q.' days');
+            $weekday = date('w', $timeItem);
+
+            if(in_array($weekday, array_keys($availWeekdays))) {
+                $hours = [];
+                $dayItem =  date('Y-m-d', $timeItem);
+
+                foreach($availWeekdays[$weekday] as $hourItem) {
+                    $dayFormated = $dayItem.' '.$hourItem.':00';
+                    if(!in_array($dayFormated, $appointments)) {
+                        $hours[] = $hourItem;
+                    }
+                }
+
+                if(count($hours) > 0) {
+                    $availability[] = [
+                        'date' => $dayItem,
+                        'hours' => $hours
+                    ];
+                }
+
+            }
+
+        }
+
+        $barber['available'] = $availability;
+
+
+        // Pegando os dados do barbeiro
+        $array['data'] = $barber;
+
+        return $array;
     }
 }
